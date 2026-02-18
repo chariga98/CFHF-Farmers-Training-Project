@@ -1,0 +1,573 @@
+# ================= LIBRARIES =================
+library(shiny)
+library(shinydashboard)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(readxl)
+library(tidyr)
+library(leaflet)
+library(sf)
+
+# ===== GENERATE KENYA COUNTY BOUNDARIES & FARMER LOCATIONS =====
+# County centers (Kenya counties)
+
+county_centers <- data.frame(
+  County = c("Vihiga", "Kericho", "Homa Bay", "Uasin Gishu", "Kakamega", 
+             "Migori", "Kisumu", "Siaya", "Busia", "Trans Nzoia", "Nandi", "Kiambu", "Bungoma"),
+  lat = c(0.09, -0.37, -0.53, 0.52, 0.28, -1.06, -0.10, 0.06, 0.46, 1.02, 0.18, -1.17, 0.57),
+  lng = c(34.73, 35.29, 34.74, 35.27, 34.75, 34.47, 34.75, 34.29, 34.11, 34.95, 35.18, 36.83, 34.71)
+)
+
+# Subcounty centers (approximate)
+subcounty_centers <- data.frame(
+  County = c("Vihiga","Vihiga","Kericho","Homa Bay","Uasin Gishu","Kakamega","Migori","Kisumu","Siaya","Busia","Trans Nzoia","Nandi","Kiambu","Bungoma"),
+  Sub.County = c("Sabatia","Luanda","Ainamoi","Rachuonyo North","Kapseret","Matungu","Mabera","Nyakach","Ugunja","Matayos","Cherangany","Nandi Hills","Limuru","Webuye West"),
+  lat = c(0.08,0.07,-0.37,-0.20,0.52,0.30,-1.05,-0.25,0.15,0.46,1.02,0.10,-1.00,0.60),
+  lng = c(34.72,34.60,35.29,34.90,35.25,34.65,34.47,35.00,34.30,34.11,34.95,35.18,36.65,34.75)
+)
+
+
+set.seed(42)
+
+# ================= LOAD DATA =================
+ file_path <- "Data/CFHF.Data.Stacked.xlsx"
+
+Identifiers <- read_excel(file_path, sheet = "Identifiers")
+
+# Generate farmer locations - ONLY COUNT UNIQUE FARMERS
+farmer_locations <- Identifiers %>%
+  distinct(Farmer_ID, .keep_all = TRUE) %>%
+  left_join(county_centers, by = "County") %>%
+  mutate(
+    latitude = lat + rnorm(n(), 0, 0.08),
+    longitude = lng + rnorm(n(), 0, 0.08)
+  ) %>%
+  select(Farmer_ID, County, Organization, latitude, longitude)
+
+Soil.Health.Practices <- read_excel(file_path, sheet = "Soil.Health.Practices")
+Pest.Management.Practices <- read_excel(file_path, sheet = "Pest.Management.Practices")
+Nutrition <- read_excel(file_path, sheet = "Family.Nutrition")
+Value_Addition <- read_excel(file_path, sheet = "IncomeGen.Val.Addition")
+Go_Food <- read_excel(file_path, sheet = "Go-Food")
+Grow_Food <- read_excel(file_path, sheet = "Grow-Food")
+Glow_Food <- read_excel(file_path, sheet = "Glow-Food")
+Value_Added_Products <- read_excel(file_path, sheet = "ValueAdditionProducts")
+Sales_Record <- read_excel(file_path, sheet = "Sales.Ravenue.Tracking")
+Livestock_Practices <- read_excel(file_path, sheet = "LivestockPractices")
+Livestock_Kept <- read_excel(file_path, sheet = "Livestock.Kept")
+Feed_Materials <- read_excel(file_path, sheet = "Feed.Materials")
+Livestock_Enterprise <- read_excel(file_path, sheet = "Livestock.Enterprises")
+Agroforestry <- read_excel(file_path, sheet = "Agroforestry.FoodForest")
+Appropriate_Technology <- read_excel(file_path, sheet = "Appropriate.Technology")
+Soil_Water_Conservation <- read_excel(file_path, sheet = "Soil.Water.Conservation")
+Agroforestry_Trees <- read_excel(file_path, sheet = "AgroforestryTreesGrown")
+Fruit_Trees <- read_excel(file_path, sheet = "FruitTrees")
+Fodder_Trees <- read_excel(file_path, sheet = "FodderTrees")
+Firewood_Timber_Trees <- read_excel(file_path, sheet = "Firewood.Timber.Trees")
+Tree_Management_Practices <- read_excel(file_path, sheet = "Tree.Mgt.Practices")
+Medicinal_Plants <- read_excel(file_path, sheet = "MedicinalPlants")
+Microgarden_Types <- read_excel(file_path, sheet = "MicroGardenType")
+Green_Energy_Types <- read_excel(file_path, sheet = "GreenEnergyType")
+DroughtResistantCrops <- read_excel(file_path, sheet = "DroughtResistantCrops")
+WaterTolerantCrops <- read_excel(file_path, sheet = "WaterTolerantCrop")
+
+# ================= HELPER FUNCTIONS =================
+make_category_count <- function(df, col_name) {
+  if(!col_name %in% colnames(df)) return(NULL)
+  df %>%
+    select(all_of(col_name)) %>%
+    filter(!is.na(.)) %>%
+    group_by(.data[[col_name]]) %>%
+    summarize(Count = n(), .groups = "drop") %>%
+    arrange(desc(Count)) %>%
+    rename(Category = 1)
+}
+
+make_vertical_bar <- function(data, title, responded, total) {
+  if(is.null(data) || nrow(data) == 0) return(plotly_empty() %>% layout(title = "No data"))
+  
+  # Ensure responded never exceeds total (safety check)
+  responded <- min(responded, total)
+  
+  subtitle <- paste0(title, "<br><sub>Farmers responded: ", responded, " out of ", total, "</sub>")
+  
+  p <- ggplot(data, aes(x = reorder(Category, -Count), y = Count, fill = Category)) +
+    geom_bar(stat = "identity") +
+    theme_minimal() +
+    labs(title = subtitle, x = "", y = "Count") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
+  ggplotly(p, tooltip = c("x", "y"))
+}
+
+make_horizontal_bar <- function(data, title, responded, total) {
+  if(is.null(data) || nrow(data) == 0) return(plotly_empty() %>% layout(title = "No data"))
+  
+  # Ensure responded never exceeds total (safety check)
+  responded <- min(responded, total)
+  
+  subtitle <- paste0(title, "<br><sub>Farmers responded: ", responded, " out of ", total, "</sub>")
+  
+  p <- ggplot(data, aes(x = reorder(Category, Count), y = Count, fill = Category)) +
+    geom_bar(stat = "identity") +
+    coord_flip() +
+    theme_minimal() +
+    labs(title = subtitle, x = "", y = "Count") +
+    theme(legend.position = "none")
+  ggplotly(p, tooltip = c("x", "y"))
+}
+
+make_pie_chart <- function(data, title, responded, total, doughnut = FALSE) {
+  if(is.null(data) || nrow(data) == 0) return(plotly_empty() %>% layout(title = "No data"))
+  
+  # Ensure responded never exceeds total (safety check)
+  responded <- min(responded, total)
+  
+  subtitle <- paste0(title, "<br>Farmers responded: ", responded, " out of ", total)
+  
+  if(doughnut) {
+    plot_ly(data, labels = ~Category, values = ~Count, type = "pie", hole = 0.5) %>%
+      layout(title = subtitle)
+  } else {
+    plot_ly(data, labels = ~Category, values = ~Count, type = "pie") %>%
+      layout(title = subtitle)
+  }
+}
+
+make_scatter_plot <- function(df, col_name, title, responded, total) {
+  if(!col_name %in% colnames(df)) return(plotly_empty() %>% layout(title = "No data"))
+  data <- df %>%
+    select(Farmer_ID, all_of(col_name)) %>%
+    filter(!is.na(.data[[col_name]])) %>%
+    rename(Food = 2)
+  if(nrow(data) == 0) return(plotly_empty() %>% layout(title = "No data"))
+  
+  # Ensure responded never exceeds total (safety check)
+  responded <- min(responded, total)
+  
+  subtitle <- paste0(title, "<br><sub>Farmers responded: ", responded, " out of ", total, "</sub>")
+  
+  p <- ggplot(data, aes(x = Food, y = Farmer_ID, color = Food)) +
+    geom_point(size = 3, alpha = 0.6) +
+    theme_minimal() +
+    labs(title = subtitle, x = "Food Type", y = "Farmer ID") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
+  ggplotly(p)
+}
+
+# ================= UI =================
+ui <- dashboardPage(
+  dashboardHeader(title = "CFHF: AE Farmers Trainings Dashboard"),
+  dashboardSidebar(
+    width = 280,
+    selectInput("round", "Assessment Round", choices = "All"),
+    selectInput("workshop", "Workshop Round", choices = "All"),
+    selectInput("org", "Organization", choices = "All"),
+    selectInput("county", "County", choices = "All"),
+    selectInput("subcounty", "Sub County", choices = "All"),
+    selectInput("cluster", "Cluster", choices = "All"),
+    selectInput("farmer", "Farmer Name", choices = "All")
+  ),
+  dashboardBody(
+    tabsetPanel(
+      tabPanel("Overview",
+               fluidRow(valueBoxOutput("farmersBox"), valueBoxOutput("workshopsBox"), valueBoxOutput("orgsBox")),
+               fluidRow(valueBoxOutput("countiesBox"), valueBoxOutput("subcountiesBox"), valueBoxOutput("clustersBox")),
+               fluidRow(box(width = 12, leafletOutput("farmerMap", height = "600px")))
+      ),
+      tabPanel("Day 1: Soil Health", box(width = 12, plotlyOutput("soilComp", height = "600px"))),
+      tabPanel("Day 2: Pest Management", box(width = 12, plotlyOutput("pestComp", height = "600px"))),
+      tabPanel("Day 3: Nutrition & Value Addition",
+               box(width = 12, plotlyOutput("nutComp", height = "500px")),
+               box(width = 12, plotlyOutput("valueComp", height = "500px")),
+               fluidRow(
+                 box(width = 4, plotlyOutput("goScatter", height = "400px")),
+                 box(width = 4, plotlyOutput("growScatter", height = "400px")),
+                 box(width = 4, plotlyOutput("glowScatter", height = "400px"))
+               ),
+               box(width = 6, plotlyOutput("vapBar", height = "400px")),
+               box(width = 6, plotlyOutput("salesDoughnut", height = "400px"))
+      ),
+      tabPanel("Day 4: Livestock",
+               box(width = 12, plotlyOutput("livestockComp", height = "500px")),
+               box(width = 6, plotlyOutput("keptBar", height = "400px")),
+               box(width = 6, plotlyOutput("feedBar", height = "400px")),
+               box(width = 12, plotlyOutput("enterprisePie", height = "400px"))
+      ),
+      tabPanel("Day 5: Climate & Agroforestry",
+               box(width = 12, plotlyOutput("agroComp", height = "500px")),
+               box(width = 12, plotlyOutput("techComp", height = "500px")),
+               box(width = 12, plotlyOutput("soilwaterComp", height = "500px")),
+               box(width = 6, plotlyOutput("agroTreeBar", height = "400px")),
+               box(width = 6, plotlyOutput("fruitTreeBar", height = "400px")),
+               box(width = 6, plotlyOutput("fodderBar", height = "400px")),
+               box(width = 6, plotlyOutput("firewoodBar", height = "400px")),
+               box(width = 6, plotlyOutput("treeMgtDoughnut", height = "400px")),
+               box(width = 6, plotlyOutput("medicinalBar", height = "400px")),
+               box(width = 6, plotlyOutput("microBar", height = "400px")),
+               box(width = 4, plotlyOutput("energyBar", height = "400px")),
+               box(width = 4, plotlyOutput("droughtBar", height = "400px")),
+               box(width = 4, plotlyOutput("waterCropBar", height = "400px"))
+      )
+    )
+  )
+)
+
+# ================= SERVER =================
+server <- function(input, output, session) {
+  
+  # ===== CASCADING FILTERS (EACH FILTER UPDATES THE NEXT) =====
+  
+  # Filter 1: Assessment Round
+  observe({
+    df <- Identifiers
+    updateSelectInput(session, "round", choices = c("All", sort(unique(na.omit(df$Assesment.Round)))))
+  })
+  
+  # Filter 2: Workshop Round (filtered by Round)
+  observe({
+    df <- Identifiers
+    if(input$round != "All") df <- df %>% filter(Assesment.Round == input$round)
+    updateSelectInput(session, "workshop", choices = c("All", sort(unique(na.omit(df$Workshop.Round)))))
+  })
+  
+  # Filter 3: Organization (filtered by Round + Workshop)
+  observe({
+    df <- Identifiers
+    if(input$round != "All") df <- df %>% filter(Assesment.Round == input$round)
+    if(input$workshop != "All") df <- df %>% filter(Workshop.Round == input$workshop)
+    updateSelectInput(session, "org", choices = c("All", sort(unique(na.omit(df$Organization)))))
+  })
+  
+  # Filter 4: County (filtered by Round + Workshop + Org)
+  observe({
+    df <- Identifiers
+    if(input$round != "All") df <- df %>% filter(Assesment.Round == input$round)
+    if(input$workshop != "All") df <- df %>% filter(Workshop.Round == input$workshop)
+    if(input$org != "All") df <- df %>% filter(Organization == input$org)
+    updateSelectInput(session, "county", choices = c("All", sort(unique(na.omit(df$County)))))
+  })
+  
+  # Filter 5: Sub County (filtered by all above)
+  observe({
+    df <- Identifiers
+    if(input$round != "All") df <- df %>% filter(Assesment.Round == input$round)
+    if(input$workshop != "All") df <- df %>% filter(Workshop.Round == input$workshop)
+    if(input$org != "All") df <- df %>% filter(Organization == input$org)
+    if(input$county != "All") df <- df %>% filter(County == input$county)
+    updateSelectInput(session, "subcounty", choices = c("All", sort(unique(na.omit(df$Sub.County)))))
+  })
+  
+  # Filter 6: Cluster (filtered by all above)
+  observe({
+    df <- Identifiers
+    if(input$round != "All") df <- df %>% filter(Assesment.Round == input$round)
+    if(input$workshop != "All") df <- df %>% filter(Workshop.Round == input$workshop)
+    if(input$org != "All") df <- df %>% filter(Organization == input$org)
+    if(input$county != "All") df <- df %>% filter(County == input$county)
+    if(input$subcounty != "All") df <- df %>% filter(Sub.County == input$subcounty)
+    updateSelectInput(session, "cluster", choices = c("All", sort(unique(na.omit(df$Cluster)))))
+  })
+  
+  # Filter 7: Farmer Name (filtered by all above)
+  observe({
+    df <- Identifiers
+    if(input$round != "All") df <- df %>% filter(Assesment.Round == input$round)
+    if(input$workshop != "All") df <- df %>% filter(Workshop.Round == input$workshop)
+    if(input$org != "All") df <- df %>% filter(Organization == input$org)
+    if(input$county != "All") df <- df %>% filter(County == input$county)
+    if(input$subcounty != "All") df <- df %>% filter(Sub.County == input$subcounty)
+    if(input$cluster != "All") df <- df %>% filter(Cluster == input$cluster)
+    updateSelectInput(session, "farmer", choices = c("All", sort(unique(na.omit(df$`Farmer Name`)))))
+  })
+  
+  # Main filtered dataset
+  filtered_ids <- reactive({
+    df <- Identifiers
+    if(input$round != "All") df <- df %>% filter(Assesment.Round == input$round)
+    if(input$workshop != "All") df <- df %>% filter(Workshop.Round == input$workshop)
+    if(input$org != "All") df <- df %>% filter(Organization == input$org)
+    if(input$county != "All") df <- df %>% filter(County == input$county)
+    if(input$subcounty != "All") df <- df %>% filter(Sub.County == input$subcounty)
+    if(input$cluster != "All") df <- df %>% filter(Cluster == input$cluster)
+    if(input$farmer != "All") df <- df %>% filter(`Farmer Name` == input$farmer)
+    df
+  })
+  
+  # ===== KENYA MAP WITH FARMER DISTRIBUTION =====
+  output$farmerMap <- renderLeaflet({
+    # Get filtered farmer locations
+    map_data <- farmer_locations %>%
+      semi_join(filtered_ids(), by = "Farmer_ID")
+    
+    if(nrow(map_data) == 0) {
+      return(leaflet() %>%
+               setView(lng = 37.5, lat = 0, zoom = 6) %>%
+               addProviderTiles("CartoDB.Positron"))
+    }
+    
+    # Color palette for organizations
+    org_colors <- c(
+      "SOFDI" = "#FF6B6B",
+      "KAPAP" = "#4ECDC4", 
+      "KACE" = "#45B7D1",
+      "FIPS" = "#FFA07A",
+      "ANEW" = "#98D8C8",
+      "IEBC" = "#F7DC6F",
+      "CEFA" = "#BB8FCE"
+    )
+    
+    colors <- colorFactor(
+      palette = org_colors,
+      domain = map_data$Organization,
+      ordered = TRUE
+    )
+    
+    leaflet(map_data) %>%
+      setView(lng = 37.5, lat = 0, zoom = 6) %>%
+      addProviderTiles("CartoDB.Positron") %>%
+      addCircleMarkers(
+        ~longitude, ~latitude,
+        radius = 6,
+        color = "white",
+        fillColor = ~colors(Organization),
+        fillOpacity = 0.8,
+        weight = 2,
+        popup = ~paste0("<b>", County, "</b><br>", Organization),
+        clusterOptions = markerClusterOptions()
+      ) %>%
+      addLegend(
+        position = "bottomright",
+        pal = colors,
+        values = ~Organization,
+        title = "Organization",
+        opacity = 0.8
+      )
+  })
+  
+  # ===== OVERVIEW KPIs =====
+  output$farmersBox <- renderValueBox({
+    valueBox(length(unique(filtered_ids()$Farmer_ID)), "Farmers", icon = icon("users"), color = "blue")
+  })
+  output$workshopsBox <- renderValueBox({
+    valueBox(length(unique(filtered_ids()$Workshop.Round)), "Workshops", icon = icon("chalkboard"), color = "purple")
+  })
+  output$orgsBox <- renderValueBox({
+    valueBox(length(unique(filtered_ids()$Organization)), "Organizations", icon = icon("handshake"), color = "yellow")
+  })
+  output$countiesBox <- renderValueBox({
+    valueBox(length(unique(filtered_ids()$County)), "Counties", icon = icon("map"), color = "green")
+  })
+  output$subcountiesBox <- renderValueBox({
+    valueBox(length(unique(filtered_ids()$Sub.County)), "Sub Counties", icon = icon("map-marked"), color = "olive")
+  })
+  output$clustersBox <- renderValueBox({
+    valueBox(length(unique(filtered_ids()$Cluster)), "Farmer groups", icon = icon("layer-group"), color = "orange")
+  })
+  
+  # Get total unique farmers for response calculations
+  total_farmers_count <- reactive({
+    length(unique(filtered_ids()$Farmer_ID))
+  })
+  
+  # ===== DAY 1 =====
+  output$soilComp <- renderPlotly({
+    df <- Soil.Health.Practices %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "Soil.Health.Practices")
+    make_vertical_bar(data, "Soil Fertility Management: What Farmers are Currently Doing", responded, total_farmers_count())
+  })
+  
+  # ===== DAY 2 =====
+  output$pestComp <- renderPlotly({
+    df <- Pest.Management.Practices %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "Pest.Management.Practices")
+    make_vertical_bar(data, "Integrated Pest Management: What Farmers Are currently doing", responded, total_farmers_count())
+  })
+  
+  # ===== DAY 3 =====
+  output$nutComp <- renderPlotly({
+    df <- Nutrition %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "Family.Nutrition.Practices")
+    make_vertical_bar(data, "Family Nutrition: What Farmers are Doing", responded, total_farmers_count())
+  })
+  
+  output$valueComp <- renderPlotly({
+    df <- Value_Addition %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "Income.ValueAddition.Practices")
+    make_horizontal_bar(data, " Income generation and Value Addition", responded, total_farmers_count())
+  })
+  
+  output$goScatter <- renderPlotly({
+    df <- Go_Food %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    make_scatter_plot(df, "Go-Foods", "Go Foods", responded, total_farmers_count())
+  })
+  
+  output$growScatter <- renderPlotly({
+    df <- Grow_Food %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    make_scatter_plot(df, "Grow-Foods", "Grow Foods", responded, total_farmers_count())
+  })
+  
+  output$glowScatter <- renderPlotly({
+    df <- Glow_Food %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    make_scatter_plot(df, "Glow-Foods", "Glow Foods", responded, total_farmers_count())
+  })
+  #output$vapBar <- renderPlotly({
+   # df <- Value_Added_Products %>% semi_join(filtered_ids(), by = "Farmer_ID")
+   # responded <- length(unique(df$Farmer_ID))
+   # data <- make_category_count(df, "ValueAdditionProducts")
+   # make_vertical_bar(data, "Value Added Products", responded, total_farmers_count())
+  # })
+  
+  output$salesDoughnut <- renderPlotly({
+    df <- Sales_Record %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "Sales.Revenue.Tracking")
+    make_pie_chart(data, "Sales Revenue Tracking", responded, total_farmers_count(), doughnut = TRUE)
+  })
+  
+  # ===== DAY 4 =====
+  output$livestockComp <- renderPlotly({
+    df <- Livestock_Practices %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "Livestock.Practices")
+    make_vertical_bar(data, "Livestock Production: Current Prctices", responded, total_farmers_count())
+  })
+  
+  output$keptBar <- renderPlotly({
+    df <- Livestock_Kept %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "Livestock.Kept")
+    make_vertical_bar(data, "Livestock Kept", responded, total_farmers_count())
+  })
+  
+  output$feedBar <- renderPlotly({
+    df <- Feed_Materials %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "Feed.Materials")
+    make_horizontal_bar(data, "Feed Materials", responded, total_farmers_count())
+  })
+  
+  output$enterprisePie <- renderPlotly({
+    df <- Livestock_Enterprise %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "Livestock.Enterprises")
+    make_pie_chart(data, "Livestock Enterprises", responded, total_farmers_count())
+  })
+  
+  # ===== DAY 5 =====
+  output$agroComp <- renderPlotly({
+    df <- Agroforestry %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "AgroforestryFoodForest")
+    make_vertical_bar(data, "Agroforestry and Food Forest: What Farmers Have", responded, total_farmers_count())
+  })
+  
+  output$techComp <- renderPlotly({
+    df <- Appropriate_Technology %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "AppropriateTechnology")
+    make_vertical_bar(data, "Appropriate Technologies", responded, total_farmers_count())
+  })
+  
+  output$soilwaterComp <- renderPlotly({
+    df <- Soil_Water_Conservation %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "Soil.Water.Conservation")
+    make_horizontal_bar(data, "Soil & Water Conservation", responded, total_farmers_count())
+  })
+  
+  output$agroTreeBar <- renderPlotly({
+    df <- Agroforestry_Trees %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "AgroforestryTrees")
+    make_vertical_bar(data, "Agroforestry Trees Grown", responded, total_farmers_count())
+  })
+  
+  output$fruitTreeBar <- renderPlotly({
+    df <- Fruit_Trees %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "FruitTrees")
+    make_vertical_bar(data, "Fruit Trees Grown", responded, total_farmers_count())
+  })
+  
+  output$fodderBar <- renderPlotly({
+    df <- Fodder_Trees %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "FodderTrees")
+    make_horizontal_bar(data, "Fodder Trees Grown", responded, total_farmers_count())
+  })
+  
+  output$firewoodBar <- renderPlotly({
+    df <- Firewood_Timber_Trees %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "FirewoodTimberTrees")
+    make_vertical_bar(data, "Firewood/Timber Trees Grown", responded, total_farmers_count())
+  })
+  
+  output$treeMgtDoughnut <- renderPlotly({
+    df <- Tree_Management_Practices %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "TreeManagementPractices")
+    make_pie_chart(data, "Tree Management Practices", responded, total_farmers_count(), doughnut = TRUE)
+  })
+  
+  output$medicinalBar <- renderPlotly({
+    df <- Medicinal_Plants %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "MedicinalPlants")
+    make_horizontal_bar(data, "Medicinal Plants", responded, total_farmers_count())
+  })
+  
+  output$microBar <- renderPlotly({
+    df <- Microgarden_Types %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "MicrogardenTypes")
+    make_horizontal_bar(data, "Microgarden Types", responded, total_farmers_count())
+  })
+  
+  output$energyBar <- renderPlotly({
+    df <- Green_Energy_Types %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "GreenEnergyTypes")
+    make_vertical_bar(data, "Green Energy Types", responded, total_farmers_count())
+  })
+  
+  output$droughtBar <- renderPlotly({
+    df <- DroughtResistantCrops %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "DroughtResistantCrops")
+    make_vertical_bar(data, "Drought Resistant Crops", responded, total_farmers_count())
+  })
+  
+  output$waterCropBar <- renderPlotly({
+    df <- WaterTolerantCrops %>% semi_join(filtered_ids(), by = "Farmer_ID")
+    responded <- length(unique(df$Farmer_ID))
+    data <- make_category_count(df, "WaterTolerantCrops")
+    make_vertical_bar(data, "Water Tolerant Crops", responded, total_farmers_count())
+  })
+}
+
+# ================= RUN APP =================
+shinyApp(ui, server)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
