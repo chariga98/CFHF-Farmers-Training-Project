@@ -1,0 +1,263 @@
+# Kenya Farmer Map Visualization
+# This script creates an interactive map of Kenya with:
+# 1. Main map showing all selected counties and sub-counties
+# 2. Farmer locations colored by organization
+# 3. Detailed insets of selected counties with sub-county boundaries
+
+# Install required packages (uncomment if needed)
+install.packages(c("leaflet", "sf", "raster", "sp", "ggplot2", "tidyverse", "maptools", "rgeos"))
+
+library(leaflet)
+library(sf)
+library(tidyverse)
+
+# ============================================================================
+# PART 1: Load and prepare your farmer data
+# ============================================================================
+
+# Your farmer data
+farmers_data <- data.frame(
+  Assessment = c("Baseline", "Baseline"),
+  Round = c(174, 166),
+  Workshop = c(218, 937),
+  Farmer_ID = c(18, 18),
+  Farmer_Name = c("Danson Maniagi", "Nicholus Jumba Obiero"),
+  Organization = c("SOFDI", "SOFDI"),
+  County = c("Vihiga", "Vihiga"),
+  Sub.County = c("Sabatia", "Sabatia"),
+  Cluster = c("Sabatia Sofdi", "Sabatia Sofdi")
+)
+
+# NOTE: You'll need to add latitude and longitude to your farmers data
+# For now, we'll use approximate coordinates for Sabatia sub-county
+farmers_data <- farmers_data %>%
+  mutate(
+    lat = 0.08,  # Approximate latitude for Sabatia
+    lng = 34.72  # Approximate longitude for Sabatia
+  )
+
+# ============================================================================
+# PART 2: Define county and sub-county centers
+# ============================================================================
+
+county_centers <- data.frame(
+  County = c("Vihiga", "Kericho", "Homa Bay", "Uasin Gishu", "Kakamega", 
+             "Migori", "Kisumu", "Siaya", "Busia", "Trans Nzoia", "Nandi", "Kiambu", "Bungoma"),
+  lat = c(0.09, -0.37, -0.53, 0.52, 0.28, -1.06, -0.10, 0.06, 0.46, 1.02, 0.18, -1.17, 0.57),
+  lng = c(34.73, 35.29, 34.74, 35.27, 34.75, 34.47, 34.75, 34.29, 34.11, 34.95, 35.18, 36.83, 34.71)
+)
+
+subcounty_centers <- data.frame(
+  County = c("Vihiga","Vihiga","Kericho","Homa Bay","Uasin Gishu","Kakamega","Migori","Kisumu","Siaya","Busia","Trans Nzoia","Nandi","Kiambu","Bungoma"),
+  Sub.County = c("Sabatia","Luanda","Ainamoi","Rachuonyo North","Kapseret","Matungu","Mabera","Nyakach","Ugunja","Matayos","Cherangany","Nandi Hills","Limuru","Webuye West"),
+  lat = c(0.08,0.07,-0.37,-0.20,0.52,0.30,-1.05,-0.25,0.15,0.46,1.02,0.10,-1.00,0.60),
+  lng = c(34.72,34.60,35.29,34.90,35.25,34.65,34.47,35.00,34.30,34.11,34.95,35.18,36.65,34.75)
+)
+
+# ============================================================================
+# PART 3: Create color palette for organizations
+# ============================================================================
+
+organizations <- unique(farmers_data$Organization)
+colors <- setNames(
+  c("#FF6B6B", "#4ECDC4", "#45B7D1", "#FFA07A", "#98D8C8", "#F7DC6F"),
+  organizations[1:min(length(organizations), 6)]
+)
+
+# ============================================================================
+# PART 4: Create main leaflet map of Kenya
+# ============================================================================
+
+kenya_map <- leaflet() %>%
+  # Set map center to Kenya's center
+  setView(lng = 34.88, lat = 0.02, zoom = 5) %>%
+  
+  # Add different tile providers
+  addProviderTiles("CartoDB.Positron", group = "Light Map") %>%
+  addProviderTiles("OpenStreetMap.Mapnik", group = "Street Map") %>%
+  addProviderTiles("Esri.WorldImagery", group = "Satellite") %>%
+  
+  # Add county circles and labels
+  addCircles(
+    data = county_centers,
+    lng = ~lng,
+    lat = ~lat,
+    radius = 30000,  # 30km radius
+    color = "#2C3E50",
+    fill = TRUE,
+    fillColor = "#3498DB",
+    fillOpacity = 0.2,
+    weight = 2,
+    popup = ~County,
+    group = "Counties"
+  ) %>%
+  
+  # Add county labels
+  addLabelOnlyMarkers(
+    data = county_centers,
+    lng = ~lng,
+    lat = ~lat,
+    label = ~County,
+    labelOptions = labelOptions(
+      noHide = TRUE,
+      direction = 'top',
+      textsize = '12px',
+      textOnly = TRUE,
+      style = list(
+        "color" = "#2C3E50",
+        "font-weight" = "bold",
+        "font-size" = "12px"
+      )
+    ),
+    group = "County Labels"
+  ) %>%
+  
+  # Add sub-county markers
+  addCircleMarkers(
+    data = subcounty_centers,
+    lng = ~lng,
+    lat = ~lat,
+    radius = 5,
+    color = "#E74C3C",
+    fill = TRUE,
+    fillColor = "#E74C3C",
+    fillOpacity = 0.7,
+    weight = 1,
+    popup = ~paste0(Sub.County, " (", County, ")"),
+    group = "Sub-counties"
+  ) %>%
+  
+  # Add sub-county labels
+  addLabelOnlyMarkers(
+    data = subcounty_centers,
+    lng = ~lng,
+    lat = ~lat,
+    label = ~Sub.County,
+    labelOptions = labelOptions(
+      noHide = FALSE,
+      direction = 'bottom',
+      textsize = '10px',
+      textOnly = TRUE,
+      style = list(
+        "color" = "#C0392B",
+        "font-size" = "9px"
+      )
+    ),
+    group = "Sub-county Labels"
+  ) %>%
+  
+  # Add farmer locations colored by organization
+  addCircleMarkers(
+    data = farmers_data,
+    lng = ~lng,
+    lat = ~lat,
+    radius = 8,
+    color = ~colors[Organization],
+    fill = TRUE,
+    fillColor = ~colors[Organization],
+    fillOpacity = 0.8,
+    weight = 2,
+    popup = ~paste0(
+      "<strong>", Farmer_Name, "</strong><br/>",
+      "Organization: ", Organization, "<br/>",
+      "County: ", County, "<br/>",
+      "Sub-County: ", Sub.County, "<br/>",
+      "Cluster: ", Cluster
+    ),
+    group = "Farmers"
+  ) %>%
+  
+  # Add legend for organizations
+  addLegend(
+    position = "bottomright",
+    colors = colors,
+    labels = names(colors),
+    title = "Organizations",
+    opacity = 0.8
+  ) %>%
+  
+  # Add layer control
+  addLayersControl(
+    baseGroups = c("Light Map", "Street Map", "Satellite"),
+    overlayGroups = c("Counties", "County Labels", "Sub-counties", "Sub-county Labels", "Farmers"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+
+# ============================================================================
+# PART 5: Save the map
+# ============================================================================
+
+# Save as HTML file
+htmlwidgets::saveWidget(
+  kenya_map,
+  file = "kenya_farmer_map.html",
+  selfcontained = TRUE
+)
+
+cat("Map saved as 'kenya_farmer_map.html'\n")
+
+# Display the map
+kenya_map
+
+# ============================================================================
+# PART 6: Alternative - Create a static ggplot version
+# ============================================================================
+
+# If you prefer a static image instead, uncomment this section:
+
+# library(ggplot2)
+# 
+# p <- ggplot() +
+#   # County circles
+#   geom_circle(
+#     data = county_centers,
+#     aes(x0 = lng, y0 = lat, r = 0.3),
+#     fill = NA,
+#     color = "#2C3E50",
+#     size = 0.5
+#   ) +
+#   # County labels
+#   geom_text(
+#     data = county_centers,
+#     aes(x = lng, y = lat, label = County),
+#     size = 3,
+#     fontface = "bold",
+#     color = "#2C3E50"
+#   ) +
+#   # Sub-county points
+#   geom_point(
+#     data = subcounty_centers,
+#     aes(x = lng, y = lat),
+#     color = "#E74C3C",
+#     size = 2
+#   ) +
+#   # Sub-county labels
+#   geom_text(
+#     data = subcounty_centers,
+#     aes(x = lng, y = lat, label = Sub.County),
+#     size = 2.5,
+#     vjust = -1,
+#     color = "#C0392B"
+#   ) +
+#   # Farmer points
+#   geom_point(
+#     data = farmers_data,
+#     aes(x = lng, y = lat, color = Organization),
+#     size = 3,
+#     alpha = 0.7
+#   ) +
+#   theme_minimal() +
+#   theme(
+#     plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+#     legend.position = "bottom",
+#     panel.grid = element_line(color = "lightgray", size = 0.2)
+#   ) +
+#   labs(
+#     title = "Farmers Distribution Across Kenya Counties",
+#     x = "Longitude",
+#     y = "Latitude",
+#     color = "Organization"
+#   )
+# 
+# print(p)
+# ggsave("kenya_farmer_map_static.png", p, width = 12, height = 10, dpi = 300)
