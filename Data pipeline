@@ -1,0 +1,72 @@
+install.packages(c(
+  "shiny", "bs4Dash", "shinyWidgets", "tidyverse", "plotly",
+  "sf", "geodata", "janitor", "readxl"
+))
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(geodata)
+library(sf)
+######################################################################################################################################
+##DATA PIPELINE — CLEAN + STACK EVERYTHING
+
+file_path <- "C:/Users/okoth/OneDrive/Desktop/CFHF/CFHF.Data.Stacked.xlsx"
+
+# Load identifiers
+Identifiers <- read_excel(file_path, sheet = "Identifiers") |> clean_names()
+
+# Function to standardize practice datasets
+process_practice <- function(sheet, practice_col, day, domain){
+  
+  read_excel(file_path, sheet = sheet) |>
+    clean_names() |>
+    select(farmer_id, !!sym(practice_col)) |>
+    rename(practice = !!sym(practice_col)) |>
+    mutate(
+      workshop_day = day,
+      domain = domain
+    )
+}
+
+# Process all datasets
+practices <- bind_rows(
+  
+  process_practice("Soil.Health.Practices", "soil_health_practices", "Day 1", "Soil Health"),
+  process_practice("Pest.Management.Practices", "pest_management_practices", "Day 2", "Pest Management"),
+  
+  process_practice("Family.Nutrition", "family_nutrition_practices", "Day 3", "Nutrition"),
+  process_practice("IncomeGen.Val.Addition", "income_valueaddition_practices", "Day 3", "Value Addition"),
+  process_practice("Go-Food", "go_foods", "Day 3", "Nutrition"),
+  process_practice("Grow-Food", "grow_foods", "Day 3", "Nutrition"),
+  process_practice("Glow-Food", "glow_foods", "Day 3", "Nutrition"),
+  process_practice("Sales.Ravenue.Tracking", "sales_revenue_tracking", "Day 3", "Sales"),
+  
+  process_practice("LivestockPractices", "livestock_practices", "Day 4", "Livestock"),
+  process_practice("Livestock.Kept", "livestock_kept", "Day 4", "Livestock"),
+  process_practice("Feed.Materials", "feed_materials", "Day 4", "Livestock"),
+  process_practice("Livestock.Enterprises", "livestock_enterprises", "Day 4", "Livestock"),
+  
+  process_practice("Agroforestry.FoodForest", "agroforestryfoodforest", "Day 5", "Climate"),
+  process_practice("Appropriate.Technology", "appropriatetechnology", "Day 5", "Climate"),
+  process_practice("Soil.Water.Conservation", "soil_water_conservation", "Day 5", "Climate"),
+  process_practice("AgroforestryTreesGrown", "agroforestrytrees", "Day 5", "Climate"),
+  process_practice("FruitTrees", "fruittrees", "Day 5", "Climate"),
+  process_practice("FodderTrees", "foddertrees", "Day 5", "Climate"),
+  process_practice("Firewood.Timber.Trees", "firewoodtimbertrees", "Day 5", "Climate"),
+  process_practice("MedicinalPlants", "medicinalplants", "Day 5", "Climate"),
+  process_practice("Tree.Mgt.Practices", "treemanagementpractices", "Day 5", "Climate"),
+  process_practice("MicroGardenType", "microgardentypes", "Day 5", "Climate"),
+  process_practice("GreenEnergyType", "greenenergytypes", "Day 5", "Climate"),
+  process_practice("DroughtResistantCrops", "droughtresistantcrops", "Day 5", "Climate"),
+  process_practice("WaterTolerantCrop", "watertolerantcrops", "Day 5", "Climate")
+  
+)
+
+# Merge with identifiers
+master <- practices |>
+  left_join(Identifiers, by = "farmer_id")
+####################################################################################################################################################
+##KENYA COUNTY MAP (AUTO DOWNLOAD)
+kenya_map <- geodata::gadm("KEN", level = 1, path = tempdir()) |>
+  st_as_sf() |>
+  rename(county = NAME_1)
