@@ -1,0 +1,789 @@
+install.packages('gt')
+install.packages('gtExtras')
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(gt)
+library(gtExtras)
+library(scales)
+library(readxl)
+
+###SUMMARY TABLES
+filepath3 <- "C:/Users/okoth/OneDrive/Desktop/CFHF/DIVFEEDCROP.xlsx"
+Diversity <- read_excel(filepath3, sheet = "AVG")
+Feedmaterials <- read_excel(filepath3, sheet = "FeedMaterials")
+
+filepath2 <- "C:/Users/okoth/OneDrive/Desktop/CFHF/CropsGrown.xlsx"
+CropsGrown <- read_excel(filepath2)
+
+filepath4 <- "C:/Users/okoth/OneDrive/Desktop/CFHF/CFHF.Data_Tables.xlsx"
+SoilHealth <- read_excel(filepath4, sheet = "Day1")
+Pestmanagement <- read_excel(filepath4, sheet = "Day2")
+Valueaddition_Nutrition <- read_excel(filepath4, sheet="Day3")
+Livestock<- read_excel(filepath4, sheet = "Day4")
+Climatechangemitigation<- read_excel(filepath4, sheet = "Day5")
+###TABLE 1###############################################################################
+
+df <- CropsGrown %>% 
+  # Standardize missing values
+  mutate(across(everything(), ~ na_if(str_trim(.), ""))) %>%
+  mutate(across(everything(), ~ na_if(., "N/A"))) %>%
+  mutate(across(everything(), ~ na_if(., "NA"))) %>%
+  
+  # Correct column types
+  mutate(
+    `Farmer Name` = as.character(`Farmer Name`),
+    Organization  = as.factor(Organization),
+    County        = as.factor(County),
+    
+    # All remaining columns → numeric (0/1)
+    across(-(1:3), as.numeric)
+  )
+
+
+# ---- 1. Convert to long format ----
+df_long <- df %>% 
+  pivot_longer(
+    cols = -(1:3),
+    names_to = "Crop",
+    values_to = "Value"
+  ) %>% 
+  filter(!is.na(Value))
+
+# ---- 2. County-level adoption summary ----
+county_summary <- df_long %>%
+  group_by(County, Crop) %>%
+  summarise(
+    farmers_growing = sum(Value == 1, na.rm = TRUE),
+    total_farmers   = n_distinct(`Farmer Name`),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    county_percent = farmers_growing / total_farmers * 100
+  )
+
+# ---- 3. Overall adoption summary ----
+overall_summary <- df_long %>%
+  group_by(Crop) %>%
+  summarise(
+    total_growing = sum(Value == 1, na.rm = TRUE),
+    total_farmers = n_distinct(`Farmer Name`),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    overall_percent = total_growing / total_farmers * 100
+  )
+
+# ---- 4. County × Crop percentage matrix ----
+
+final_table <- county_summary %>%
+  select(County, Crop, county_percent) %>%
+  pivot_wider(
+    names_from  = County,
+    values_from = county_percent
+  )
+
+# ---- 5. Beautiful publication table ----
+
+gt_table <- final_table %>%
+  gt(rowname_col = "Crop") %>%
+  tab_header(
+    title = "Percentage of Farmers Growing Each Crop by County",
+    subtitle = "County-level crop adoption rates"
+  ) %>%
+  fmt_number(
+    columns = where(is.numeric),
+    decimals = 1
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = where(is.numeric)
+  ) %>%
+  gtExtras::gt_color_rows(
+    columns = where(is.numeric),
+    palette = "viridis"
+  ) %>%
+  opt_all_caps() %>%
+  opt_table_outline() %>%
+  tab_source_note(
+    source_note = "Source: CFHF Project Baseline Evaluation Data"
+  )
+
+gt_table
+gtsave(gt_table, "Percentage of Farmers Growing Each Crop by County.png", zoom = 3)
+####################################################################
+#############################################
+# ================================
+# Crops Grown by ≥30% of Farmers
+# Crop × County Matrix Table
+# ================================
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(gt)
+library(gtExtras)
+library(scales)
+
+# ---- 1. Load data ----
+filepath <- "C:/Users/okoth/OneDrive/Desktop/CFHF/CropsGrown.xlsx"
+df <- read_excel(filepath)
+
+# ---- 2. Clean + set types ----
+
+df <- df %>%
+  mutate(
+    across(everything(), ~ na_if(str_trim(as.character(.)), "")),
+    across(everything(), ~ na_if(., "N/A")),
+    across(everything(), ~ na_if(., "NA")),
+    
+    `Farmer Name` = as.character(`Farmer Name`),
+    Organization  = as.factor(Organization),
+    County        = as.factor(County),
+    across(-(1:3), ~ suppressWarnings(as.numeric(.)))
+  )
+df <- df %>% select(-c(Meat,Mangoes,"Ripe Bananas","Paw paw",Avocado ))
+
+# ---- 3. Long format ----
+df_long <- df %>%
+  pivot_longer(
+    cols = -(1:3),
+    names_to = "Crop",
+    values_to = "Value"
+  ) %>%
+  filter(!is.na(Value))
+
+# ---- 4. County adoption summary ----
+county_summary <- df_long %>%
+  group_by(County, Crop) %>%
+  summarise(
+    farmers_growing = sum(Value == 1, na.rm = TRUE),
+    total_farmers   = n_distinct(`Farmer Name`),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    county_percent = farmers_growing / total_farmers * 100
+  )
+
+# ---- 5. Keep crops with ≥50% in ANY county ----
+filtered <- county_summary %>%
+  group_by(Crop) %>%
+  filter(any(county_percent >= 50)) %>%
+  ungroup()
+
+# ---- 6. Crop × County matrix ----
+final_table <- filtered %>%
+  select(Crop, County, county_percent) %>%
+  pivot_wider(
+    names_from = County,
+    values_from = county_percent
+  )
+
+# ---- 7. Publication-quality table ----
+gt_table <- final_table %>%
+  gt(rowname_col = "Crop") %>%
+  tab_header(
+    title = "Commonly Grown Crops by County (≥50% of Farmers)",
+    subtitle = "Share of farmers growing each crop, by county"
+  
+  ) %>%
+  fmt_number(
+    columns = where(is.numeric),
+    decimals = 0
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = where(is.numeric)
+  ) %>%
+  gtExtras::gt_color_rows(
+    columns = where(is.numeric),
+    palette = "viridis"
+  ) %>%
+  opt_all_caps() %>%
+  opt_table_outline() %>%
+  tab_source_note(
+    source_note = "Source: CFHF Project Baseline Evaluation Data"
+  )
+
+gt_table
+###################################################################################################
+###########################################################################################
+library(dplyr)
+library(tidyr)
+library(gt)
+filepath3 <- "C:/Users/okoth/OneDrive/Desktop/CFHF/DIVFEEDCROP.xlsx"
+Diversity <- read_excel(filepath3, sheet = "AVG")
+# Drop unwanted column
+Diversity <- Diversity %>% select(-FoderTreesDiversity)
+
+# Rename columns to neat publication-ready names
+Diversity <- Diversity %>% rename(
+  `Average number of livestock kept` = LivestockKeptDiversity,
+  `Average number of livestock enterprises` = LivestockEnterprisesDiversity,
+  `Average Go foods` = GoDiversity,
+  `Average Grow foods` = GroDiversity,
+  `Average Glow foods` = GlowDiversity,
+  `Average number of value addition products` = ValueAdditionDiversity,
+  `Average number of water tolerant crops grown` = WaterTolerantCropDiversity,
+  `Average number of drought resistant crops` = DroughtResistantCropDiversity,
+  `Average Microgarden types` = MicrogardenDiversity,
+  `Average number of tree management practices` = TreemanagementPracticesDiversity,
+  `Average agroforestry trees` = AgroforestreeDiversity,
+  `Average fruit trees grown` = FruitTreeDiversity,
+  `Average feed materials` = FeedMaterialDiversity
+)
+
+# Compute county averages
+county_avg_matrix <- Diversity %>%
+  group_by(County) %>%
+  summarise(across(
+    all_of(c(
+      "Average number of livestock kept",
+      "Average number of livestock enterprises",
+      "Average Go foods",
+      "Average Grow foods",
+      "Average Glow foods",
+      "Average number of value addition products",
+      "Average number of water tolerant crops grown",
+      "Average number of drought resistant crops",
+      "Average Microgarden types",
+      "Average number of tree management practices",
+      "Average agroforestry trees",
+      "Average fruit trees grown",
+      "Average feed materials"
+    )),
+    mean, na.rm = TRUE
+  )) %>%
+  pivot_longer(
+    cols = -County,
+    names_to = "DiversityDimension",
+    values_to = "AverageScore"
+  ) %>%
+  pivot_wider(
+    names_from = County,
+    values_from = AverageScore
+  )
+
+# Build publication-ready table
+gt_table <- county_avg_matrix %>%
+  gt(rowname_col = "DiversityDimension") %>%
+  tab_header(
+    title = html("<div style='width:130%; margin:auto; text-align:center;'>Average Diversity Indicators For Each Farmer by County</div>"),
+    subtitle = html("<div style='width:130%; margin:auto; text-align:center;'>Values represent county averages per farmer, rounded to the nearest whole number</div>")
+  ) %>%
+  fmt_number(
+    columns = -DiversityDimension,
+    decimals = 0   # round off to whole numbers
+  ) %>%
+  cols_label(
+    DiversityDimension = "Diversity Dimension"
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = -DiversityDimension
+  ) %>%
+    data_color(
+      columns = where(is.numeric),
+      fn = function(x) {
+        ifelse(x <3, "#440154",      # dark purple
+               ifelse(x < 6, "#26828E",      # teal green
+                      "#FDE725"))             # volt yellow-green
+      }
+    
+  )%>%
+  opt_table_outline() %>%
+  opt_row_striping() %>%
+  # Legend first, centered
+  tab_source_note(
+    source_note = html(
+      "<div style='width:130%; margin:auto; text-align:center;'>
+       <b>Legend:</b> 
+       <span style='display:inline-block;width:15px;height:15px;background-color:#440154;margin-right:5px;'></span> 0–2 
+       <span style='display:inline-block;width:15px;height:15px;background-color:#26828E;margin-left:15px;margin-right:5px;'></span> 3–5 
+       <span style='display:inline-block;width:15px;height:15px;background-color:#FDE725;margin-left:15px;margin-right:5px;'></span> 6+
+       </div>"
+    )
+  ) %>%
+  # Source last, centered
+  tab_source_note(
+    source_note = html("<div style='width:130%; margin:auto; text-align:center;'>Source: CFHF Project Baseline Evaluation Data</div>")
+  ) %>%
+  tab_options(
+    table.font.size = px(11),
+    column_labels.padding = px(2),
+    data_row.padding = px(3)
+  )
+
+gt_table
+
+############################################################################################
+
+
+# ---- 2. Clean + set types ----
+
+Feedmaterials <- Feedmaterials %>%
+  mutate(
+    across(everything(), ~ na_if(str_trim(as.character(.)), "")),
+    across(everything(), ~ na_if(., "N/A")),
+    across(everything(), ~ na_if(., "NA")),
+    
+    `Farmer Name` = as.character(`Farmer Name`),
+    Organization  = as.factor(Organization),
+    County        = as.factor(County),
+    across(-(1:3), ~ suppressWarnings(as.numeric(.)))
+  )
+
+# ---- 3. Long format ----
+df_long <- df %>%
+  pivot_longer(
+    cols = -(1:3),
+    names_to = "Crop",
+    values_to = "Value"
+  ) %>%
+  filter(!is.na(Value))
+
+# ---- 4. County adoption summary ----
+county_summary <- df_long %>%
+  group_by(County, Crop) %>%
+  summarise(
+    farmers_growing = sum(Value == 1, na.rm = TRUE),
+    total_farmers   = n_distinct(`Farmer Name`),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    county_percent = farmers_growing / total_farmers * 100
+  )
+
+# ---- 5. Keep crops with ≥30% in ANY county ----
+filtered <- county_summary %>%
+  group_by(Crop) %>%
+  filter(any(county_percent >= 50)) %>%
+  ungroup()
+
+# ---- 6. Crop × County matrix ----
+final_table <- filtered %>%
+  select(Crop, County, county_percent) %>%
+  pivot_wider(
+    names_from = County,
+    values_from = county_percent
+  )
+
+# ---- 7. Publication-quality table ----
+gt_table <- final_table %>%
+  gt(rowname_col = "Crop") %>%
+  tab_header(
+    title = "Commonly Grown Crops by County (≥50% of Farmers)",
+    subtitle = "Share of farmers growing each crop, by county"
+    
+  ) %>%
+  fmt_number(
+    columns = where(is.numeric),
+    decimals = 1
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = where(is.numeric)
+  ) %>%
+  gtExtras::gt_color_rows(
+    columns = where(is.numeric),
+    palette = "viridis"
+  ) %>%
+  opt_all_caps() %>%
+  opt_table_outline() %>%
+  tab_source_note(
+    source_note = "Source: CFHF Project Baseline Evaluation Data"
+  )
+
+gt_table
+##########################################################
+########## REPEAT TABLE 1: 3 COLOURS######################
+##########################################################
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(gt)
+
+filepath <- "C:/Users/okoth/OneDrive/Desktop/CFHF/CropsGrown.xlsx"
+df <- read_excel(filepath)
+
+# ---- 2. Clean + set types ----
+df <- df %>%
+  mutate(
+    across(everything(), ~ na_if(str_trim(as.character(.)), "")),
+    across(everything(), ~ na_if(., "N/A")),
+    across(everything(), ~ na_if(., "NA")),
+    
+    `Farmer Name` = as.character(`Farmer Name`),
+    Organization  = as.factor(Organization),
+    County        = as.factor(County),
+    across(-(1:3), ~ suppressWarnings(as.numeric(.)))
+  )
+
+df <- df %>% select(-c(Meat, Mangoes, "Ripe Bananas", "Paw paw", Avocado))
+
+# ---- 3. Long format ----
+df_long <- df %>%
+  pivot_longer(
+    cols = -(1:3),
+    names_to = "Crop",
+    values_to = "Value"
+  ) %>%
+  filter(!is.na(Value))
+
+# ---- 4. County adoption summary ----
+county_summary <- df_long %>%
+  group_by(County, Crop) %>%
+  summarise(
+    farmers_growing = sum(Value == 1, na.rm = TRUE),
+    total_farmers   = n_distinct(`Farmer Name`),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    county_percent = farmers_growing / total_farmers * 100
+  )
+
+# ---- 5. Keep crops with ≥50% in ANY county ----
+filtered <- county_summary %>%
+  group_by(Crop) %>%
+  filter(any(county_percent >= 50)) %>%
+  ungroup()
+
+# ---- 6. Crop × County matrix ----
+final_table <- filtered %>%
+  select(Crop, County, county_percent) %>%
+  pivot_wider(
+    names_from = County,
+    values_from = county_percent
+  )
+
+# ---- 7. Publication-quality table with conditional coloring + legend first, source last ----
+gt_table <- final_table %>%
+  gt(rowname_col = "Crop") %>%
+  tab_header(
+    title = "Commonly Grown Crops by County (≥50% of Farmers)",
+    subtitle = "Percentage of Workshop Farmers Growing Each Crop by County"
+  ) %>%
+  fmt_number(
+    columns = where(is.numeric),
+    decimals = 0
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = where(is.numeric)
+  ) %>%
+  data_color(
+    columns = where(is.numeric),
+    fn = function(x) {
+      ifelse(x < 50, "#440154",      # dark purple
+             ifelse(x < 75, "#26828E",      # teal green
+                    "#FDE725"))             # volt yellow-green
+    }
+  ) %>%
+  opt_all_caps() %>%
+  opt_table_outline() %>%
+  # Legend first
+  tab_source_note(
+    source_note = html(
+      " <div style='width:100%; margin:auto; text-align:center;'>
+      <b>Legend:</b> 
+       <span style='display:inline-block;width:15px;height:15px;background-color:#440154;margin-right:5px;'></span> Below 50% 
+       <span style='display:inline-block;width:15px;height:15px;background-color:#26828E;margin-left:15px;margin-right:5px;'></span> 50–74% 
+       <span style='display:inline-block;width:15px;height:15px;background-color:#FDE725;margin-left:15px;margin-right:5px;'></span> 75–100%"
+    )
+  ) %>%
+  # Source last
+  tab_source_note(
+    source_note = html("<div style='width:100%; margin:auto; text-align:center;'>Source: CFHF Project Baseline Evaluation Data</div>")
+  ) %>% tab_options( 
+    table.font.size = px(11)  )# set font size to 11px
+
+gt_table
+
+##########################################################################################################################################
+##################LEAAT GROWN CROPS#############################################################################################################
+#####################################################################################################
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(gt)
+
+filepath <- "C:/Users/okoth/OneDrive/Desktop/CFHF/CropsGrown.xlsx"
+df <- read_excel(filepath)
+
+# ---- 2. Clean + set types ----
+df <- df %>%
+  mutate(
+    across(everything(), ~ na_if(str_trim(as.character(.)), "")),
+    across(everything(), ~ na_if(., "N/A")),
+    across(everything(), ~ na_if(., "NA")),
+    
+    `Farmer Name` = as.character(`Farmer Name`),
+    Organization  = as.factor(Organization),
+    County        = as.factor(County),
+    across(-(1:3), ~ suppressWarnings(as.numeric(.)))
+  )
+
+df <- df %>% select(-c(Meat, Mangoes, "Ripe Bananas", "Paw paw", Avocado,
+                       Banana, Cassava, Groundnuts, Millet,
+                       Lemon, Oranges, "Irish Potatoes", Pumpkin,
+                       "Pumpkin Leaves", Sorghum, Spinach, Guavas,
+                       "Soya beans", "Sweet Potatoes"))
+
+# ---- 3. Long format ----
+df_long <- df %>%
+  pivot_longer(
+    cols = -(1:3),
+    names_to = "Crop",
+    values_to = "Value"
+  ) %>%
+  filter(!is.na(Value))
+
+# ---- 4. County adoption summary ----
+county_summary <- df_long %>%
+  group_by(County, Crop) %>%
+  summarise(
+    farmers_growing = sum(Value == 1, na.rm = TRUE),
+    total_farmers   = n_distinct(`Farmer Name`),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    county_percent = farmers_growing / total_farmers * 100
+  )
+
+# ---- 5. Keep crops with ≤49% in ANY county ----
+filtered <- county_summary %>%
+  group_by(Crop) %>%
+  filter(any(county_percent <= 49)) %>%
+  ungroup()
+
+# ---- 6. County × Crop matrix (flipped layout) ----
+final_table <- filtered %>%
+  select(County, Crop, county_percent) %>%
+  pivot_wider(
+    names_from = Crop,
+    values_from = county_percent
+  )
+
+# ---- 7. Build gt table ----
+# Create vertical labels for crops
+crop_labels <- names(final_table)[-1]  # all crop columns
+vertical_labels <- setNames(
+  lapply(crop_labels, function(x) html(
+    paste0("<div style='writing-mode: vertical-rl; transform: rotate(180deg); font-size:10px;'>", x, "</div>")
+  )),
+  crop_labels
+)
+
+gt_table <- final_table %>%
+  gt(rowname_col = "County") %>%
+  tab_header(
+    title = "Less Commonly Grown Crops by County (≤49% of Farmers)",
+    subtitle = "Percentage of Workshop Farmers Growing Each Crop by County (Grouped: 0–10%, 11–30%, 31–49%)"
+  ) %>%
+  fmt_number(
+    columns = where(is.numeric),
+    decimals = 0
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = where(is.numeric)
+  ) %>%
+  cols_label(.list = vertical_labels) %>%   # apply vertical labels
+  data_color(
+    columns = where(is.numeric),
+    fn = function(x) {
+      ifelse(x <= 10, "#440154",      # dark purple for 0–10%
+             ifelse(x <= 30, "#26828E",      # teal green for 11–30%
+                    "#FDE725"))              # volt yellow-green for 31–49%
+    }
+  ) %>%
+  opt_table_outline() %>%
+  # Legend first
+  tab_source_note(
+    source_note = html(
+      "<div style='width:100%; margin:auto; text-align:center;'>
+      <b>Legend:</b> 
+       <span style='display:inline-block;width:15px;height:15px;background-color:#440154;margin-right:5px;'></span> 0–10% 
+       <span style='display:inline-block;width:15px;height:15px;background-color:#26828E;margin-left:15px;margin-right:5px;'></span> 11–30% 
+       <span style='display:inline-block;width:15px;height:15px;background-color:#FDE725;margin-left:15px;margin-right:5px;'></span> 31–49%"
+    )
+  ) %>%
+  # Source last
+  tab_source_note(
+    source_note = html("<div style='width:100%; margin:auto; text-align:center;'>Source: CFHF Project Baseline Evaluation Data</div>")
+  ) %>%
+  tab_options(
+    table.font.size = px(13),        # smaller font overall
+    column_labels.padding = px(2),   # reduce spacing between columns
+    data_row.padding = px(3)         # compact row spacing
+  )
+
+gt_table
+#############################################################################################################
+####################TABLE FOR THEMES##################################################################
+#########################################################################################################3
+library(dplyr)
+library(tidyr)
+library(gt)
+#_------Rename coluns
+SoilHealth<- SoilHealth%>%
+  rename(Use.Compost.Manure = Compost.Manure,
+         Use.Boma.Compost = Boma.Compost,
+         Use.Garden.Compost = Garden.Compost,
+         Use.Bokashi.Compost = Bokashi.Compost,
+         Use.Vermicompost = Vermicompost,
+         Use.Animal.Urine = Animal.Urine,
+         Use.Human.Urine = Human.Urine,
+         Use.Tithonia.Tea = Tithonia.Tea,
+         Use.Manure.Tea = Manure.Tea,
+        " Use.Organc.Residue/Legume.For.Striga" = "Organc.Residue/Legume. For.Striga"
+         )
+Pestmanagement<- Pestmanagement%>%
+  rename(
+    Plant.Flowers.For.Beneficial.Insects = Flowers.For.Beneficial.Insects,
+    Practice.Crop.Rotation =Crop.Rotation
+  )
+Livestock<- Livestock%>%
+  rename(
+    Keep.Multiple.Livestock.Type = Multiple.Livestock.Type,
+    Make.Ferment.Feeds = Ferment.Feeds,
+    Allow.Animal.To.Exhibit.Natural.Behavior = Animal.Exhibit.Natural.Behavior,
+   " Preserve.Animal.Feeds(Silage)" = Preserve.Animal.Feeds,
+    Use.Botanicals.To.Manage.Animal.Health = Use.Botanicals,
+  )
+Climatechangemitigation<-Climatechangemitigation%>%
+  rename(
+    Use.Innovative.Microgardens = Adopted.Innovative.Microgardening,
+    Grow.Crop.Tolerant.to.Excess.Water = Grow.Crop.Tollerant.Excess.Water,
+    "Use.Buffer/Grass.Strip" = "Use.Baffer/Grass.Strip",
+    Practice.Contour.Planting = Contour.Planting
+  )
+# ---- Helper function for practice × organization table ----
+make_practice_table <- function(df1, title, subtitle) {
+  
+  # Ensure identifiers are character, others numeric
+  df1 <- df1 %>%
+    mutate(
+      across(c(Farmer_ID, `Farmer Name`, Organization, County), as.character),
+      across(-c(Farmer_ID, `Farmer Name`, Organization, County),
+             ~ suppressWarnings(as.numeric(.)))
+    )
+  
+  # Long format: practices
+  df_long <- df1 %>%
+    pivot_longer(
+      cols = -c(Farmer_ID, `Farmer Name`, Organization, County),
+      names_to = "Practice",
+      values_to = "Value"
+    ) %>%
+    filter(!is.na(Value))
+  
+  # Summarize by organization × practice
+  org_summary <- df_long %>%
+    group_by(Organization, Practice) %>%
+    summarise(
+      farmers_practicing = sum(Value == 1, na.rm = TRUE),
+      total_farmers = n_distinct(Farmer_ID),
+      .groups = "drop"
+    ) %>%
+    mutate(percent = farmers_practicing / total_farmers * 100)
+  
+  # Wide format: practices as rows, organizations as columns
+  final_table <- org_summary %>%
+    select(Practice, Organization, percent) %>%
+    pivot_wider(
+      names_from = Organization,
+      values_from = percent
+    )
+  
+  # Build gt table
+  gt_table <- final_table %>%
+    gt(rowname_col = "Practice") %>%
+    tab_header(
+      title = html(paste0("<div style='width:130%; margin:auto; text-align:center;'>", title, "</div>")),
+      subtitle = html(paste0("<div style='width:130%; margin:auto; text-align:center;'>", subtitle, "</div>"))
+    ) %>%
+    fmt_number(
+      columns = where(is.numeric),
+      decimals = 0
+    ) %>%
+    cols_align(
+      align = "center",
+      columns = where(is.numeric)
+    ) %>%
+    data_color(
+      columns = where(is.numeric),
+      fn = function(x) {
+        ifelse(x < 50, "#440154",      # dark purple
+               ifelse(x < 75, "#26828E",      # teal green
+                      "#FDE725"))             # volt yellow-green
+      }
+    ) %>%
+    opt_table_outline() %>%
+    # Legend first, centered relative to organization columns
+    tab_source_note(
+      source_note = html(
+        "<div style='width:130%; margin:auto; text-align:center;'>
+         <b>Legend:</b> 
+         <span style='display:inline-block;width:15px;height:15px;background-color:#440154;margin-right:5px;'></span> Below 50% 
+         <span style='display:inline-block;width:15px;height:15px;background-color:#26828E;margin-left:15px;margin-right:5px;'></span> 50–74% 
+         <span style='display:inline-block;width:15px;height:15px;background-color:#FDE725;margin-left:15px;margin-right:5px;'></span> 75–100%
+         </div>"
+      )
+    ) %>%
+    # Source last, centered relative to organization columns
+    tab_source_note(
+      source_note = html("<div style='width:130%; margin:auto; text-align:center;'>Source: CFHF Project Baseline Evaluation Data</div>")
+    ) %>%
+    tab_options(
+      table.font.size = px(11),
+      column_labels.padding = px(2),
+      data_row.padding = px(3)
+    )
+  
+  return(gt_table)
+}
+
+# ---- Apply to each dataset ----
+SoilHealth_table <- make_practice_table(
+  SoilHealth,
+  "Soil Fertility Management Practices by Organization",
+  "Percentage of Farmers Practicing Soil Fertility Management"
+)
+
+Pestmanagement_table <- make_practice_table(
+  Pestmanagement,
+  "Integrated Pest Management Practices by Organization",
+  "Percentage of Farmers Practicing Integrated Pest Management"
+)
+
+Valueaddition_table <- make_practice_table(
+  Valueaddition_Nutrition,
+  "Value Addition & Nutrition Practices by Organization",
+  "Percentage of Farmers Practicing Value Addition and Targeting Family Nutrition in Crop Production"
+)
+
+Livestock_table <- make_practice_table(
+  Livestock,
+  "Livestock Production Practices by Organization",
+  "Percentage of Farmers Practicing Livestock Production"
+)
+
+Climate_table <- make_practice_table(
+  Climatechangemitigation,
+  "Climate Change Mitigation Strategies by Organization",
+  "Percentage of Farmers Practicing Climate Change Mitigation Strategies"
+)
+
+# Example: display one
+SoilHealth_table
+Pestmanagement_table
+Valueaddition_table
+Livestock_table
+Climate_table
+  
