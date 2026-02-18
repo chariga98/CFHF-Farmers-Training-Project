@@ -1,0 +1,77 @@
+install.packages(c("readxl","XLConnect","tidyverse", "shinydashboard", "plotly", "DT"))
+install.packages(c("rnaturalearth", "rnaturalearthdata", "sf", "ggplot2", "shiny", "shinydashboard", "dplyr", "plotly", "DT", "readxl"))
+# Install the package from GitHub
+if (!require("rnaturalearthhires")) {
+  install.packages("remotes")
+  remotes::install_github("ropensci/rnaturalearthhires")
+}
+
+library(tidyverse)
+library(shinydashboard)
+library(plotly)
+library(DT)
+library(readxl)
+library(purrr)
+library(rnaturalearth)
+library(sf)
+
+#####################################################################################
+#####################################################################################
+##Load CFHF Original Data
+# Define the file path
+path <- "C:/Users/okoth/OneDrive/Desktop/CFHF/CFHF.Data_Normal.xlsx"
+
+# Read all sheets into a single list
+CFHF.Data.Normal <- path %>%
+  excel_sheets() %>%
+  set_names() %>%
+  map(~ read_excel(path = path, sheet = .x))
+
+# To access a specific sheet, e.g., "Sheet1"
+# CFHF.Data.Normal$Sheet1
+####################################################################################
+path1<-  "C:/Users/okoth/OneDrive/Desktop/CFHF/CFHF.Data.Stacked.xlsx"
+CFHF.Data.Stacked <- path1 %>%
+  excel_sheets()%>%
+  set_names()%>%
+  map(~read_excel(path = path1, sheet = .x))
+####################################################################################
+##Load CFHF Stacked Data
+file_path <- "C:/Users/okoth/OneDrive/Desktop/CFHF/CFHF.Data.Stacked.xlsx"
+#I dentifiers
+Identifiers  <- read_excel(file_path, sheet = "Identifiers")
+#Day 1
+Soil.Health.Practices      <- read_excel(file_path, sheet = "Soil.Health.Practices")
+#Day 2
+Pest.Management.Practices  <- read_excel(file_path, sheet = "Pest.Management.Practices")
+#Day 3
+Nutrition        <- read_excel(file_path, sheet = "Family.Nutrition")
+Value_Addition   <- read_excel(file_path, sheet = "IncomeGen.Val.Addition")
+Go_Food          <- read_excel(file_path, sheet = "Go-Food")
+Grow_Food        <- read_excel(file_path, sheet = "Grow-Food")
+Glow_Food        <- read_excel(file_path, sheet = "Glow-Food")
+Sales_Record     <- read_excel(file_path, sheet = "Sales.Ravenue.Tracking")
+#Day 4
+Livestock_Practices    <- read_excel(file_path, sheet = "LivestockPractices")
+Livestock_Kept         <- read_excel(file_path, sheet = "Livestock.Kept")
+Feed_Mateials          <- read_excel(file_path, sheet = "Feed.Materials")
+Livestock_Enterprise   <- read_excel(file_path, sheet = "Livestock.Enterprises")
+#Day 5
+Agroforestry                 <- read_excel(file_path, sheet = "Agroforestry.FoodForest")
+Appropriate_Technology       <- read_excel(file_path, sheet = "Appropriate.Technology")
+Soil_Water_conservation      <- read_excel(file_path, sheet = "Soil.Water.Conservation")
+Agroforestry_Trees           <- read_excel(file_path, sheet = "AgroforestryTreesGrown")
+Fruit_Trees                  <- read_excel(file_path, sheet = "FruitTrees")
+Fodder_Trees                 <- read_excel(file_path, sheet = "FodderTrees")
+Firewood_Timber_Trees        <- read_excel(file_path, sheet = "Firewood.Timber.Trees")
+Medicinal_Plant              <- read_excel(file_path, sheet = "MedicinalPlants")
+Tree_Management_Practices    <- read_excel(file_path, sheet = "Tree.Mgt.Practices")
+Micro_garden_types           <- read_excel(file_path, sheet = "MicroGardenType")
+Green_Energy_Type            <- read_excel(file_path, sheet = "GreenEnergyType")
+Drought_Resistant_Crops      <- read_excel(file_path, sheet = "DroughtResistantCrops")
+Water_Resistant_Crops        <- read_excel(file_path, sheet = "WaterTolerantCrop")
+########################################################################################
+#Load CFHF Classified Data
+path2 <- "C:\Users\okoth\OneDrive\Desktop\CFHF\CFHF.Data_Classified.xlsx"
+########################################################################################
+
